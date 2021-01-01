@@ -9,12 +9,12 @@ Although resultdb is only designed for result preview, not suitable for large sc
 ```
 from pyspider.database import connect_database
 resultdb = connect_database("<your resutldb connection url>")
-for project in resultdb:
+for project in resultdb.projects:
     for result in resultdb.select(project):
         assert result['taskid']
         assert result['url']
         assert result['result']
-``` 
+```
 
 The `result['result']` is the object submitted by `return` statement from your script.
 
@@ -25,7 +25,7 @@ In product environment, you may want to connect pyspider to your system / post-p
 ```
 from pyspider.result import ResultWorker
 
-Class MyResultWorker(ResultWorker):
+class MyResultWorker(ResultWorker):
     def on_result(self, task, result):
         assert task['taskid']
         assert task['project']
@@ -67,11 +67,11 @@ One workaround is using `send_message` API to make a `fake` taskid for each resu
 
 ```
 def detail_page(self, response):
-    for li in response.doc('li'):
+    for li in response.doc('li').items():
         self.send_message(self.project_name, {
             ...
         }, url=response.url+"#"+li('a.product-sku').text())
-        
+
 def on_message(self, project, msg):
     return msg
 ```

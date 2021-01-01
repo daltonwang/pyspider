@@ -24,7 +24,9 @@ class ProcessorResult(object):
     """The result and logs producted by a callback"""
 
     def __init__(self, result=None, follows=(), messages=(),
-                 logs=(), exception=None, extinfo={}, save=None):
+                 logs=(), exception=None, extinfo=None, save=None):
+        if extinfo is None:
+            extinfo = {}
         self.result = result
         self.follows = follows
         self.messages = messages
@@ -66,7 +68,8 @@ class Processor(object):
 
     def __init__(self, projectdb, inqueue, status_queue, newtask_queue, result_queue,
                  enable_stdout_capture=True,
-                 enable_projects_import=True):
+                 enable_projects_import=True,
+                 process_time_limit=PROCESS_TIME_LIMIT):
         self.inqueue = inqueue
         self.status_queue = status_queue
         self.newtask_queue = newtask_queue
@@ -79,6 +82,7 @@ class Processor(object):
         self.project_manager = ProjectManager(projectdb, dict(
             result_queue=self.result_queue,
             enable_stdout_capture=self.enable_stdout_capture,
+            process_time_limit=process_time_limit,
         ))
 
         if enable_projects_import:
@@ -90,8 +94,7 @@ class Processor(object):
 
         `from project import project_name`
         '''
-        if six.PY2:
-            sys.meta_path.append(ProjectFinder(self.projectdb))
+        sys.meta_path.append(ProjectFinder(self.projectdb))
 
     def __del__(self):
         pass
@@ -140,7 +143,7 @@ class Processor(object):
                         'time': response.time,
                         'error': response.error,
                         'status_code': response.status_code,
-                        'encoding': response.encoding,
+                        'encoding': getattr(response, '_encoding', None),
                         'headers': track_headers,
                         'content': response.text[:500] if ret.exception else None,
                     },

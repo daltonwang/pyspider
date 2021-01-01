@@ -7,21 +7,39 @@
 
 
 import os
-import re
 import time
 import base64
+import six
 from six import BytesIO
 from wsgidav.wsgidav_app import DEFAULT_CONFIG, WsgiDAVApp
 from wsgidav.dav_provider import DAVProvider, DAVCollection, DAVNonCollection
-from wsgidav.dav_error import DAVError, HTTP_NOT_FOUND, HTTP_FORBIDDEN
+from wsgidav.dav_error import DAVError, HTTP_FORBIDDEN
 from pyspider.libs.utils import utf8, text
 from .app import app
+
+
+def check_user(environ):
+    authheader = environ.get("HTTP_AUTHORIZATION")
+    if not authheader:
+        return False
+    authheader = authheader[len("Basic "):]
+    try:
+        username, password = text(base64.b64decode(authheader)).split(':', 1)
+    except Exception as e:
+        app.logger.error('wrong api key: %r, %r', authheader, e)
+        return False
+
+    if username == app.config['webui_username'] \
+            and password == app.config['webui_password']:
+        return True
+    else:
+        return False
 
 
 class ContentIO(BytesIO):
     def close(self):
         self.content = self.getvalue()
-        BytesIO.close(self)
+        BytesIO.close(self) #old class
 
 
 class ScriptResource(DAVNonCollection):
@@ -31,7 +49,7 @@ class ScriptResource(DAVNonCollection):
         self.app = app
         self.new_project = False
         self._project = project
-        self.project_name = self.name
+        self.project_name = text(self.name)
         self.writebuffer = None
         if self.project_name.endswith('.py'):
             self.project_name = self.project_name[:-len('.py')]
@@ -44,7 +62,7 @@ class ScriptResource(DAVNonCollection):
         if projectdb:
             self._project = projectdb.get(self.project_name)
         if not self._project:
-            if projectdb.verify_project_name(self.project_name) and self.name.endswith('.py'):
+            if projectdb.verify_project_name(self.project_name) and text(self.name).endswith('.py'):
                 self.new_project = True
                 self._project = {
                     'name': self.project_name,
@@ -66,22 +84,7 @@ class ScriptResource(DAVNonCollection):
         if 'lock' in projectdb.split_group(self.project.get('group')) \
                 and self.app.config.get('webui_username') \
                 and self.app.config.get('webui_password'):
-
-            authheader = self.environ.get("HTTP_AUTHORIZATION")
-            if not authheader:
-                return True
-            authheader = authheader[len("Basic "):]
-            try:
-                username, password = text(base64.b64decode(authheader)).split(':', 1)
-            except Exception as e:
-                self.app.logger.error('wrong api key: %r, %r', authheader, e)
-                return True
-
-            if username == self.app.config['webui_username'] \
-                    and password == self.app.config['webui_password']:
-                return False
-            else:
-                return True
+            return not check_user(self.environ)
         return False
 
     def getContentLength(self):
@@ -136,11 +139,13 @@ class RootCollection(DAVCollection):
     def getMemberList(self):
         members = []
         for project in self.projectdb.get_all():
-            project_name = utf8(project['name'])
+            project_name = project['name']
             if not project_name.endswith('.py'):
                 project_name += '.py'
+            native_path = os.path.join(self.path, project_name)
+            native_path = text(native_path) if six.PY3 else utf8(native_path)
             members.append(ScriptResource(
-                os.path.join(self.path, project_name),
+                native_path,
                 self.environ,
                 self.app,
                 project
@@ -150,10 +155,10 @@ class RootCollection(DAVCollection):
     def getMemberNames(self):
         members = []
         for project in self.projectdb.get_all(fields=['name', ]):
-            project_name = utf8(project['name'])
+            project_name = project['name']
             if not project_name.endswith('.py'):
                 project_name += '.py'
-            members.append(project_name)
+            members.append(utf8(project_name))
         return members
 
 
@@ -166,11 +171,33 @@ class ScriptProvider(DAVProvider):
         return "pyspiderScriptProvider"
 
     def getResourceInst(self, path, environ):
-        path = os.path.normpath(path)
+        path = os.path.normpath(path).replace('\\', '/')
         if path in ('/', '.', ''):
+            path = '/'
             return RootCollection(path, environ, self.app)
         else:
             return ScriptResource(path, environ, self.app)
+
+
+class NeedAuthController(object):
+    def __init__(self, app):
+        self.app = app
+
+    def getDomainRealm(self, inputRelativeURL, environ):
+        return 'need auth'
+
+    def requireAuthentication(self, realmname, environ):
+        return self.app.config.get('need_auth', False)
+
+    def isRealmUser(self, realmname, username, environ):
+        return username == self.app.config.get('webui_username')
+
+    def getRealmUserPassword(self, realmname, username, environ):
+        return self.app.config.get('webui_password')
+
+    def authDomainUser(self, realmname, username, password, environ):
+        return username == self.app.config.get('webui_username') \
+            and password == self.app.config.get('webui_password')
 
 
 config = DEFAULT_CONFIG.copy()
@@ -179,7 +206,7 @@ config.update({
     'provider_mapping': {
         '/': ScriptProvider(app)
     },
-    'user_mapping': {},
+    'domaincontroller': NeedAuthController(app),
     'verbose': 1 if app.debug else 0,
     'dir_browser': {'davmount': False,
                     'enable': True,

@@ -21,7 +21,7 @@ class RedisQueue(object):
     max_timeout = 0.3
 
     def __init__(self, name, host='localhost', port=6379, db=0,
-                 maxsize=0, lazy_limit=True, password=None):
+                 maxsize=0, lazy_limit=True, password=None, cluster_nodes=None):
         """
         Constructor for RedisQueue
 
@@ -31,7 +31,11 @@ class RedisQueue(object):
                     for better performance.
         """
         self.name = name
-        self.redis = redis.StrictRedis(host=host, port=port, db=db, password=password)
+        if(cluster_nodes is not None):
+            from rediscluster import StrictRedisCluster
+            self.redis = StrictRedisCluster(startup_nodes=cluster_nodes)
+        else:
+            self.redis = redis.StrictRedis(host=host, port=port, db=db, password=password)
         self.maxsize = maxsize
         self.lazy_limit = lazy_limit
         self.last_qsize = 0
@@ -62,7 +66,7 @@ class RedisQueue(object):
 
     def put(self, obj, block=True, timeout=None):
         if not block:
-            return self.put_nowait()
+            return self.put_nowait(obj)
 
         start_time = time.time()
         while True:

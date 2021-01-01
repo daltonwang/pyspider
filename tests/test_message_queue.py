@@ -8,7 +8,7 @@
 import os
 import six
 import time
-import unittest2 as unittest
+import unittest
 
 from pyspider.libs import utils
 from six.moves import queue as Queue
@@ -44,6 +44,7 @@ class TestMessageQueue(object):
             self.q1.put_nowait('TEST_DATA%d' % i)
         for i in range(3):
             self.q2.put('TEST_DATA%d' % i)
+
         with self.assertRaises(Queue.Full):
             self.q1.put('TEST_DATA6', timeout=0.01)
         with self.assertRaises(Queue.Full):
@@ -72,7 +73,7 @@ class BuiltinQueue(TestMessageQueue, unittest.TestCase):
             self.q3 = connect_message_queue('test_queue_for_threading_test')
 
 
-@unittest.skipIf(six.PY3, 'pika not suport python 3')
+#@unittest.skipIf(six.PY3, 'pika not suport python 3')
 @unittest.skipIf(os.environ.get('IGNORE_RABBITMQ') or os.environ.get('IGNORE_ALL'), 'no rabbitmq server for test.')
 class TestPikaRabbitMQ(TestMessageQueue, unittest.TestCase):
 
@@ -80,9 +81,9 @@ class TestPikaRabbitMQ(TestMessageQueue, unittest.TestCase):
     def setUpClass(self):
         from pyspider.message_queue import rabbitmq
         with utils.timeout(3):
-            self.q1 = rabbitmq.PikaQueue('test_queue', maxsize=5)
-            self.q2 = rabbitmq.PikaQueue('test_queue', amqp_url='amqp://localhost:5672/%2F', maxsize=5)
-            self.q3 = rabbitmq.PikaQueue('test_queue_for_threading_test', amqp_url='amqp://guest:guest@localhost:5672/')
+            self.q1 = rabbitmq.PikaQueue('test_queue', maxsize=5, lazy_limit=False)
+            self.q2 = rabbitmq.PikaQueue('test_queue', amqp_url='amqp://localhost:5672/%2F', maxsize=5, lazy_limit=False)
+            self.q3 = rabbitmq.PikaQueue('test_queue_for_threading_test', amqp_url='amqp://guest:guest@localhost:5672/', lazy_limit=False)
         self.q2.delete()
         self.q2.reconnect()
         self.q3.delete()
@@ -96,6 +97,25 @@ class TestPikaRabbitMQ(TestMessageQueue, unittest.TestCase):
         del self.q2
         del self.q3
 
+    def test_30_full(self):
+        self.assertEqual(self.q1.qsize(), 0)
+        self.assertEqual(self.q2.qsize(), 0)
+        for i in range(2):
+            self.q1.put_nowait('TEST_DATA%d' % i)
+        for i in range(3):
+            self.q2.put('TEST_DATA%d' % i)
+
+        print(self.q1.__dict__)
+        print(self.q1.qsize())
+        with self.assertRaises(Queue.Full):
+            self.q1.put_nowait('TEST_DATA6')
+        print(self.q1.__dict__)
+        print(self.q1.qsize())
+        with self.assertRaises(Queue.Full):
+            self.q1.put('TEST_DATA6', timeout=0.01)
+
+
+@unittest.skipIf(six.PY3, 'Python 3 now using Pika')
 @unittest.skipIf(os.environ.get('IGNORE_RABBITMQ') or os.environ.get('IGNORE_ALL'), 'no rabbitmq server for test.')
 class TestAmqpRabbitMQ(TestMessageQueue, unittest.TestCase):
 
@@ -104,11 +124,11 @@ class TestAmqpRabbitMQ(TestMessageQueue, unittest.TestCase):
         from pyspider.message_queue import connect_message_queue
         with utils.timeout(3):
             self.q1 = connect_message_queue('test_queue', 'amqp://localhost:5672/',
-                                            maxsize=5)
+                                            maxsize=5, lazy_limit=False)
             self.q2 = connect_message_queue('test_queue', 'amqp://localhost:5672/%2F',
-                                            maxsize=5)
+                                            maxsize=5, lazy_limit=False)
             self.q3 = connect_message_queue('test_queue_for_threading_test',
-                                            'amqp://guest:guest@localhost:5672/')
+                                            'amqp://guest:guest@localhost:5672/', lazy_limit=False)
         self.q2.delete()
         self.q2.reconnect()
         self.q3.delete()
@@ -122,36 +142,23 @@ class TestAmqpRabbitMQ(TestMessageQueue, unittest.TestCase):
         del self.q2
         del self.q3
 
-#@unittest.skipIf(True, "beanstalk queue can't pass the test currently")
-@unittest.skipIf(six.PY3, 'beanstalkc not suport python 3')
-@unittest.skipIf(os.environ.get('IGNORE_BEANSTALK') or os.environ.get('IGNORE_ALL'), 'no beanstalk server for test.')
-class TestBeansTalkQueue(TestMessageQueue, unittest.TestCase):
+    def test_30_full(self):
+        self.assertEqual(self.q1.qsize(), 0)
+        self.assertEqual(self.q2.qsize(), 0)
+        for i in range(2):
+            self.q1.put_nowait('TEST_DATA%d' % i)
+        for i in range(3):
+            self.q2.put('TEST_DATA%d' % i)
 
-    @classmethod
-    def setUpClass(self):
-        from pyspider.message_queue import connect_message_queue
-        with utils.timeout(3):
-            self.q1 = connect_message_queue('test_queue', 'beanstalk://localhost:11300',
-                                            maxsize=5)
-            self.q2 = connect_message_queue('test_queue', 'beanstalk://localhost:11300',
-                                            maxsize=5)
-            self.q3 = connect_message_queue('test_queue_for_threading_test',
-                                            'beanstalk://localhost:11300')
-            while not self.q1.empty():
-                self.q1.get()
-            while not self.q2.empty():
-                self.q2.get()
-            while not self.q3.empty():
-                self.q3.get()
+        print(self.q1.__dict__)
+        print(self.q1.qsize())
+        with self.assertRaises(Queue.Full):
+            self.q1.put('TEST_DATA6', timeout=0.01)
+        print(self.q1.__dict__)
+        print(self.q1.qsize())
+        with self.assertRaises(Queue.Full):
+            self.q1.put_nowait('TEST_DATA6')
 
-    @classmethod
-    def tearDownClass(self):
-        while not self.q1.empty():
-            self.q1.get()
-        while not self.q2.empty():
-            self.q2.get()
-        while not self.q3.empty():
-            self.q3.get()
 
 @unittest.skipIf(os.environ.get('IGNORE_REDIS') or os.environ.get('IGNORE_ALL'), 'no redis server for test.')
 class TestRedisQueue(TestMessageQueue, unittest.TestCase):
@@ -188,9 +195,9 @@ class TestKombuQueue(TestMessageQueue, unittest.TestCase):
     def setUpClass(self):
         from pyspider.message_queue import connect_message_queue
         with utils.timeout(3):
-            self.q1 = connect_message_queue('test_queue', self.kombu_url, maxsize=5)
-            self.q2 = connect_message_queue('test_queue', self.kombu_url, maxsize=5)
-            self.q3 = connect_message_queue('test_queue_for_threading_test', self.kombu_url)
+            self.q1 = connect_message_queue('test_queue', self.kombu_url, maxsize=5, lazy_limit=False)
+            self.q2 = connect_message_queue('test_queue', self.kombu_url, maxsize=5, lazy_limit=False)
+            self.q3 = connect_message_queue('test_queue_for_threading_test', self.kombu_url, lazy_limit=False)
             while not self.q1.empty():
                 self.q1.get()
             while not self.q2.empty():
@@ -220,11 +227,6 @@ class TestKombuAmpqQueue(TestKombuQueue):
 class TestKombuRedisQueue(TestKombuQueue):
     kombu_url = 'kombu+redis://'
 
-@unittest.skip('test cannot pass, get is buffered')
-@unittest.skipIf(os.environ.get('IGNORE_BEANSTALK') or os.environ.get('IGNORE_ALL'), 'no beanstalk server for test.')
-class TestKombuBeanstalkQueue(TestKombuQueue):
-    kombu_url = 'kombu+beanstalk://'
-
-@unittest.skipIf(os.environ.get('IGNORE_MONGODB') or os.environ.get('IGNORE_ALL'), 'no rabbitmq server for test.')
+@unittest.skipIf(os.environ.get('IGNORE_MONGODB') or os.environ.get('IGNORE_ALL'), 'no mongodb server for test.')
 class TestKombuMongoDBQueue(TestKombuQueue):
     kombu_url = 'kombu+mongodb://'

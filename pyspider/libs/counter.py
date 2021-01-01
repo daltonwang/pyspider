@@ -23,7 +23,7 @@ from six.moves import cPickle
 class BaseCounter(object):
 
     def __init__(self):
-        raise NotImplementedError
+        pass
 
     def event(self, value=1):
         """Fire a event."""
@@ -52,6 +52,7 @@ class TotalCounter(BaseCounter):
     """Total counter"""
 
     def __init__(self):
+        super(TotalCounter, self).__init__()
         self.cnt = 0
 
     def event(self, value=1):
@@ -78,6 +79,7 @@ class AverageWindowCounter(BaseCounter):
     """
 
     def __init__(self, window_size=300):
+        super(AverageWindowCounter, self).__init__()
         self.window_size = window_size
         self.values = deque(maxlen=window_size)
 
@@ -107,6 +109,7 @@ class TimebaseAverageEventCounter(BaseCounter):
     """
 
     def __init__(self, window_size=30, window_interval=10):
+        super(TimebaseAverageEventCounter, self).__init__()
         self.max_window_size = window_size
         self.window_size = 0
         self.window_interval = window_interval
@@ -192,6 +195,7 @@ class TimebaseAverageWindowCounter(BaseCounter):
     """
 
     def __init__(self, window_size=30, window_interval=10):
+        super(TimebaseAverageWindowCounter, self).__init__()
         self.max_window_size = window_size
         self.window_size = 0
         self.window_interval = window_interval
@@ -278,7 +282,7 @@ class CounterValue(DictMixin):
             key = self._keys + (key, )
 
         available_keys = []
-        for _key in self.manager.counters.keys():
+        for _key in list(self.manager.counters.keys()):
             if _key[:len(key)] == key:
                 available_keys.append(_key)
 
@@ -286,7 +290,7 @@ class CounterValue(DictMixin):
             raise KeyError
         elif len(available_keys) == 1:
             if available_keys[0] == key:
-                return self.manager.counters[key]
+                return self.manager.counters.get(key)
             else:
                 return CounterValue(self.manager, key)
         else:
@@ -303,7 +307,7 @@ class CounterValue(DictMixin):
 
     def keys(self):
         result = set()
-        for key in self.manager.counters.keys():
+        for key in list(self.manager.counters.keys()):
             if key[:len(self._keys)] == self._keys:
                 key = key[len(self._keys):]
                 result.add(key[0] if key else '__value__')
@@ -352,6 +356,7 @@ class CounterManager(DictMixin):
         """Set value of a counter by counter key"""
         if isinstance(key, six.string_types):
             key = (key, )
+        # assert all(isinstance(k, six.string_types) for k in key)
         assert isinstance(key, tuple), "event key type error"
         if key not in self.counters:
             self.counters[key] = self.cls()
@@ -367,7 +372,7 @@ class CounterManager(DictMixin):
     def __getitem__(self, key):
         key = (key, )
         available_keys = []
-        for _key in self.counters.keys():
+        for _key in list(self.counters.keys()):
             if _key[:len(key)] == key:
                 available_keys.append(_key)
 
@@ -375,7 +380,7 @@ class CounterManager(DictMixin):
             raise KeyError
         elif len(available_keys) == 1:
             if available_keys[0] == key:
-                return self.counters[key]
+                return self.counters.get(key)
             else:
                 return CounterValue(self, key)
         else:
@@ -384,7 +389,7 @@ class CounterManager(DictMixin):
     def __delitem__(self, key):
         key = (key, )
         available_keys = []
-        for _key in self.counters.keys():
+        for _key in list(self.counters.keys()):
             if _key[:len(key)] == key:
                 available_keys.append(_key)
         for _key in available_keys:
@@ -406,13 +411,13 @@ class CounterManager(DictMixin):
         """Dump counters as a dict"""
         self.trim()
         result = {}
-        for key, value in iteritems(self):
-            if isinstance(value, BaseCounter):
-                if get_value is not None:
-                    value = getattr(value, get_value)
-                result[key] = value
-            else:
-                result[key] = value.to_dict(get_value)
+        for key, value in iteritems(self.counters):
+            if get_value is not None:
+                value = getattr(value, get_value)
+            r = result
+            for _key in key[:-1]:
+                r = r.setdefault(_key, {})
+            r[key[-1]] = value
         return result
 
     def dump(self, filename):
@@ -420,17 +425,17 @@ class CounterManager(DictMixin):
         try:
             with open(filename, 'wb') as fp:
                 cPickle.dump(self.counters, fp)
-        except:
-            logging.error("can't dump counter to file: %s" % filename)
+        except Exception as e:
+            logging.warning("can't dump counter to file %s: %s", filename, e)
             return False
         return True
 
     def load(self, filename):
         """Load counters to file"""
         try:
-            with open(filename) as fp:
+            with open(filename, 'rb') as fp:
                 self.counters = cPickle.load(fp)
         except:
-            logging.debug("can't load counter from file: %s" % filename)
+            logging.debug("can't load counter from file: %s", filename)
             return False
         return True

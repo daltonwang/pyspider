@@ -5,11 +5,14 @@
 #         http://binux.me
 # Created on 2012-11-06 11:50:13
 
+import math
 import logging
 import hashlib
 import datetime
 import socket
 import base64
+import warnings
+import threading
 
 import six
 from six import iteritems
@@ -80,6 +83,7 @@ def format_date(date, gmt_offset=0, relative=True, shorter=False, full_format=Fa
 
     From tornado
     """
+
     if not date:
         return '-'
     if isinstance(date, float) or isinstance(date, int):
@@ -103,30 +107,12 @@ def format_date(date, gmt_offset=0, relative=True, shorter=False, full_format=Fa
 
     format = None
     if not full_format:
-        if relative and days == 0:
-            if seconds < 50:
-                return ("1 second ago" if seconds <= 1 else
-                        "%(seconds)d seconds ago") % {"seconds": seconds}
-
-            if seconds < 50 * 60:
-                minutes = round(seconds / 60.0)
-                return ("1 minute ago" if minutes <= 1 else
-                        "%(minutes)d minutes ago") % {"minutes": minutes}
-
-            hours = round(seconds / (60.0 * 60))
-            return ("1 hour ago" if hours <= 1 else
-                    "%(hours)d hours ago") % {"hours": hours}
-
-        if days == 0:
-            format = "%(time)s"
-        elif days == 1 and local_date.day == local_yesterday.day and \
-                relative:
-            format = "yesterday" if shorter else "yesterday at %(time)s"
-        elif days < 5:
-            format = "%(weekday)s" if shorter else "%(weekday)s at %(time)s"
-        elif days < 334:  # 11mo, since confusing for same month last year
-            format = "%(month)s-%(day)s" if shorter else \
-                "%(month)s-%(day)s at %(time)s"
+        ret_, fff_format = fix_full_format(days, seconds, relative, shorter, local_date, local_yesterday)
+        format = fff_format
+        if ret_:
+            return format
+        else:
+            format = format
 
     if format is None:
         format = "%(month_name)s %(day)s, %(year)s" if shorter else \
@@ -143,6 +129,33 @@ def format_date(date, gmt_offset=0, relative=True, shorter=False, full_format=Fa
         "time": str_time
     }
 
+
+def fix_full_format(days, seconds, relative, shorter, local_date, local_yesterday):
+    if relative and days == 0:
+        if seconds < 50:
+            return True, (("1 second ago" if seconds <= 1 else
+                    "%(seconds)d seconds ago") % {"seconds": seconds})
+
+        if seconds < 50 * 60:
+            minutes = round(seconds / 60.0)
+            return True, (("1 minute ago" if minutes <= 1 else
+                    "%(minutes)d minutes ago") % {"minutes": minutes})
+
+        hours = round(seconds / (60.0 * 60))
+        return True, (("1 hour ago" if hours <= 1 else
+                "%(hours)d hours ago") % {"hours": hours})
+    format = None
+    if days == 0:
+        format = "%(time)s"
+    elif days == 1 and local_date.day == local_yesterday.day and \
+            relative:
+        format = "yesterday" if shorter else "yesterday at %(time)s"
+    elif days < 5:
+        format = "%(weekday)s" if shorter else "%(weekday)s at %(time)s"
+    elif days < 334:  # 11mo, since confusing for same month last year
+        format = "%(month)s-%(day)s" if shorter else \
+            "%(month)s-%(day)s at %(time)s"
+    return False, format
 
 class TimeoutError(Exception):
     pass
@@ -168,14 +181,20 @@ try:
             raise TimeoutError(self.error_message)
 
         def __enter__(self):
+            if not isinstance(threading.current_thread(), threading._MainThread):
+                logging.warning("timeout only works on main thread, are you running pyspider in threads?")
+                self.seconds = 0
             if self.seconds:
                 signal.signal(signal.SIGALRM, self.handle_timeout)
-                signal.alarm(self.seconds)
+                signal.alarm(int(math.ceil(self.seconds)))
 
         def __exit__(self, type, value, traceback):
             if self.seconds:
                 signal.alarm(0)
-except ImportError:
+
+except ImportError as e:
+    warnings.warn("timeout is not supported on your platform.", FutureWarning)
+
     class timeout:
         """
         Time limit of command (for windows)
@@ -413,9 +432,9 @@ def python_console(namespace=None):
 
 
 def check_port_open(port, addr='127.0.0.1'):
-    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    result = sock.connect_ex((addr, port))
-    if result == 0:
-        return True
-    else:
-        return False
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        result = sock.connect_ex((addr, port))
+        if result == 0:
+            return True
+        else:
+            return False

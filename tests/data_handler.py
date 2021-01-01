@@ -1,3 +1,4 @@
+
 #!/usr/bin/env python
 # -*- encoding: utf-8 -*-
 # vim: set et sw=4 ts=4 sts=4 ff=unix fenc=utf8:
@@ -5,6 +6,7 @@
 #         http://binux.me
 # Created on 2014-02-22 14:02:21
 
+import time
 from pyspider.libs.base_handler import BaseHandler, catch_status_code_error, every
 
 class IgnoreHandler(object):
@@ -54,3 +56,7 @@ class TestHandler(BaseHandler):
     def generator(self, response):
         yield "a"
         yield "b"
+
+    def sleep(self, response):
+        time.sleep(response.save)
+

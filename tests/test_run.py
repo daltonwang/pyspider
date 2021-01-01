@@ -16,7 +16,7 @@ import signal
 import shutil
 import inspect
 import requests
-import unittest2 as unittest
+import unittest
 
 from pyspider import run
 from pyspider.libs import utils
@@ -31,7 +31,7 @@ class TestRun(unittest.TestCase):
 
         import tests.data_test_webpage
         import httpbin
-        self.httpbin_thread = utils.run_in_subprocess(httpbin.app.run, port=14887)
+        self.httpbin_thread = utils.run_in_subprocess(httpbin.app.run, port=14887, passthrough_errors=False)
         self.httpbin = 'http://127.0.0.1:14887'
 
     @classmethod
@@ -72,10 +72,10 @@ class TestRun(unittest.TestCase):
         self.assertEqual(ctx.obj.debug, True)
 
         import mysql.connector
-        with self.assertRaises(mysql.connector.InterfaceError):
+        with self.assertRaises(mysql.connector.Error):
             ctx.obj.taskdb
 
-        with self.assertRaisesRegexp(Exception, 'Connection refused'):
+        with self.assertRaises(Exception):
             ctx.obj.newtask_queue
 
     def test_30_cli_command_line(self):
@@ -89,6 +89,19 @@ class TestRun(unittest.TestCase):
 
         from pymongo.errors import ConnectionFailure
         with self.assertRaises(ConnectionFailure):
+            ctx.obj.projectdb
+
+    def test_30a_cli_command_line(self):
+        ctx = run.cli.make_context(
+            'test',
+            ['--projectdb', 'couchdb+projectdb://localhost:5984/projectdb'],
+            None,
+            obj=dict(testing_mode=True)
+        )
+        ctx = run.cli.invoke(ctx)
+
+        with self.assertRaises(Exception):
+            # TODO: MORE SPECIFIC
             ctx.obj.projectdb
 
     def test_40_cli_env(self):
@@ -139,7 +152,26 @@ class TestRun(unittest.TestCase):
             del os.environ['MONGODB_PORT_27017_TCP_ADDR']
             del os.environ['MONGODB_PORT_27017_TCP_PORT']
 
-    @unittest.skip('noly available in docker')
+    @unittest.skipIf(os.environ.get('IGNORE_COUCHDB') or os.environ.get('IGNORE_ALL'), 'no couchdb server for test.')
+    def test_60a_docker_couchdb(self):
+        try:
+            # create a test admin user
+            os.environ['COUCHDB_NAME'] = 'couchdb'
+            os.environ['COUCHDB_PORT_5984_TCP_ADDR'] = 'localhost'
+            os.environ['COUCHDB_PORT_5984_TCP_PORT'] = '5984'
+            ctx = run.cli.make_context('test', [], None,
+                                       obj=dict(testing_mode=True))
+            ctx = run.cli.invoke(ctx)
+            ctx.obj.resultdb
+        except Exception as e:
+            self.assertIsNone(e)
+        finally:
+            # remove the test admin user
+            del os.environ['COUCHDB_NAME']
+            del os.environ['COUCHDB_PORT_5984_TCP_ADDR']
+            del os.environ['COUCHDB_PORT_5984_TCP_PORT']
+
+    @unittest.skip('only available in docker')
     @unittest.skipIf(os.environ.get('IGNORE_MYSQL') or os.environ.get('IGNORE_ALL'), 'no mysql server for test.')
     def test_70_docker_mysql(self):
         try:
@@ -173,8 +205,9 @@ class TestRun(unittest.TestCase):
 
     def test_90_docker_scheduler(self):
         try:
-            os.environ['SCHEDULER_NAME'] = 'scheduler'
-            os.environ['SCHEDULER_PORT_23333_TCP'] = 'tpc://binux:25678'
+            os.environ['SCHEDULER_PORT_23333_TCP_ADDR'] = 'scheduler'
+            os.environ['SCHEDULER_PORT_23333_TCP_PORT'] = '23333'
+
             ctx = run.cli.make_context('test', [], None,
                                        obj=dict(testing_mode=True))
             ctx = run.cli.invoke(ctx)
@@ -182,12 +215,13 @@ class TestRun(unittest.TestCase):
             webui_ctx = webui.make_context('webui', [], ctx)
             app = webui.invoke(webui_ctx)
             rpc = app.config['scheduler_rpc']
-            self.assertEqual(rpc._ServerProxy__host, 'binux:25678')
+            self.assertEqual(rpc._ServerProxy__host, '{}:{}'.format(os.environ['SCHEDULER_PORT_23333_TCP_ADDR'],
+                                                                    os.environ['SCHEDULER_PORT_23333_TCP_PORT']))
         except Exception as e:
             self.assertIsNone(e)
         finally:
-            del os.environ['SCHEDULER_NAME']
-            del os.environ['SCHEDULER_PORT_23333_TCP']
+            del os.environ['SCHEDULER_PORT_23333_TCP_ADDR']
+            del os.environ['SCHEDULER_PORT_23333_TCP_PORT']
 
     def test_a100_all(self):
         import subprocess
@@ -200,7 +234,6 @@ class TestRun(unittest.TestCase):
             '--projectdb', 'local+projectdb://'+inspect.getsourcefile(data_sample_handler),
             'all',
         ], close_fds=True, preexec_fn=os.setsid)
-
 
         try:
             limit = 30

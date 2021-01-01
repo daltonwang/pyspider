@@ -7,7 +7,7 @@
 
 import os
 import time
-import unittest2 as unittest
+import unittest
 import logging.config
 logging.config.fileConfig("pyspider/logging.conf")
 
@@ -47,6 +47,12 @@ class TestProcessor(unittest.TestCase):
 
     def test_10_bad_result(self):
         self.inqueue.put(({'project': 'test_project'}, {}))
+        self.resultdb._list_project()
+        self.assertEqual(len(self.resultdb.projects), 0)
+        self.assertEqual(self.resultdb.count('test_project'), 0)
+
+    def test_10_bad_result_2(self):
+        self.inqueue.put(({'project': 'test_project'}, {'a': 'b'}))
         self.resultdb._list_project()
         self.assertEqual(len(self.resultdb.projects), 0)
         self.assertEqual(self.resultdb.count('test_project'), 0)

@@ -21,7 +21,7 @@ class ProjectDB(BaseProjectDB):
 
     def __init__(self, url):
         self.table = Table(self.__tablename__, MetaData(),
-                           Column('name', String(64)),
+                           Column('name', String(64), primary_key=True),
                            Column('group', String(64)),
                            Column('status', String(16)),
                            Column('script', Text),
@@ -38,14 +38,14 @@ class ProjectDB(BaseProjectDB):
             database = self.url.database
             self.url.database = None
             try:
-                engine = create_engine(self.url)
+                engine = create_engine(self.url, convert_unicode=True, pool_recycle=3600)
                 conn = engine.connect()
                 conn.execute("commit")
                 conn.execute("CREATE DATABASE %s" % database)
             except sqlalchemy.exc.SQLAlchemyError:
                 pass
             self.url.database = database
-        self.engine = create_engine(url)
+        self.engine = create_engine(url, convert_unicode=True, pool_recycle=3600)
         self.table.create(self.engine, checkfirst=True)
 
     @staticmethod
